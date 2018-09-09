@@ -1,3 +1,6 @@
 [submodule "lib/yolo"]
 	path = lib/yolo
 	url = git@github.com:jpbalarini/keras-yolo3.git
+[submodule "lib/deep_sort"]
+	path = lib/deep_sort
+	url = git@github.com:jpbalarini/deep_sort.git
