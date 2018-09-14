@@ -7,6 +7,7 @@ import glob
 import cv2
 import numpy as np
 import os
+from timeit import default_timer as timer
 
 from lib.deep_sort.application_util import preprocessing
 from lib.deep_sort.deep_sort import nn_matching
@@ -36,7 +37,10 @@ def detect_img(yolo, image_path):
         # cv2.imwrite(os.path.splitext(image_path)[0] + '_output.jpg', opencvImage)
         return r_image, boxes
 
-def deep_sort(frame, detection_boxes, tracker, encoder):
+def deep_sort(image, detection_boxes, tracker, encoder, fps=None):
+    img_width, img_height = image.size
+    frame = np.asarray(image)
+
     features = encoder(frame, detection_boxes)
     detections = [Detection(bbox, 1.0, feature) for bbox, feature in zip(detection_boxes, features)]
 
@@ -61,24 +65,75 @@ def deep_sort(frame, detection_boxes, tracker, encoder):
         bbox = det.to_tlbr()
         cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])),(255,0,0), 2)
 
-    opencvImage = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    max_window_size = 800, 600
+    scale_width = max_window_size[0] / img_width
+    scale_height = max_window_size[1] / img_height
+    scale = min(scale_width, scale_height)
+    window_width = int(img_width * scale)
+    window_height = int(img_height * scale)
+
+    if fps:
+        cv2.putText(frame, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=2.0, color=(255, 0, 0), thickness=2)
+    else:
+        # image doesnt have right color order
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     cv2.namedWindow('result', cv2.WINDOW_NORMAL)
-    cv2.imshow('result', opencvImage)
+    resized_image = cv2.resize(frame, (window_width, window_height))
+    cv2.imshow('result', resized_image)
 
 
 def main(FLAGS):
     yolo = YOLO(**vars(FLAGS))
+    output_path = FLAGS.video_output
 
     encoder = generate_detections.create_box_encoder(deep_sort_model_filename, batch_size=1)
     metric = nn_matching.NearestNeighborDistanceMetric('cosine', max_cosine_distance, nn_budget)
     tracker = Tracker(metric)
 
-    for image_path in glob.glob(FLAGS.images_path + '/*.jpg'):
-        image, boxes = detect_img(yolo, image_path)
-        deep_sort(np.array(image), boxes, tracker, encoder)
+    if FLAGS.images_path:
+        for image_path in glob.glob(FLAGS.images_path + '/*.jpg'):
+            image, boxes = detect_img(yolo, image_path)
+            deep_sort(image, boxes, tracker, encoder)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    elif FLAGS.video_input:
+        vid = cv2.VideoCapture(FLAGS.video_input)
+        if not vid.isOpened():
+            raise IOError("Couldn't open webcam or video")
+        video_FourCC = int(vid.get(cv2.CAP_PROP_FOURCC))
+        video_fps = vid.get(cv2.CAP_PROP_FPS)
+        video_size = (int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                      int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+        isOutput = True if output_path != "" else False
+        if isOutput:
+            print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
+            out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
+        accum_time = 0
+        curr_fps = 0
+        fps = "FPS: ??"
+        prev_time = timer()
+        while True:
+            return_value, frame = vid.read()
+            image = Image.fromarray(frame)
+            image, boxes = yolo.detect_image(image)
+
+            curr_time = timer()
+            exec_time = curr_time - prev_time
+            prev_time = curr_time
+            accum_time = accum_time + exec_time
+            curr_fps = curr_fps + 1
+            if accum_time > 1:
+                accum_time = accum_time - 1
+                fps = "FPS: " + str(curr_fps)
+                curr_fps = 0
+
+            deep_sort(image, boxes, tracker, encoder, fps)
+            if isOutput:
+                out.write(result)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
     yolo.close_session()
     cv2.destroyAllWindows()
 
@@ -109,19 +164,21 @@ if __name__ == '__main__':
     '''
     Command line positional arguments -- for video detection mode
     '''
+    # /Volumes/BACKUP_2TB/Maestria/Datasets/test.mp4
     parser.add_argument(
-        "--input", nargs='?', type=str,required=False,default='./path2your_video',
+        "--video_input", nargs='?', type=str, required=False,
+        default='/Volumes/BACKUP_2TB/Maestria/Datasets/test.mp4',
         help = "Video input path"
     )
     parser.add_argument(
-        "--output", nargs='?', type=str, default="",
+        "--video_output", nargs='?', type=str, default="",
         help = "[Optional] Video output path"
     )
 
-    # /Volumes/BACKUP_2TB/Maestria/Code/a
+    # /Volumes/BACKUP_2TB/Maestria/Datasets/Crowd_PETS09/S2/L1/Time_12-34/View_001
     parser.add_argument(
         '--images_path', type=str,
-        help='Path from where to read images', default='/Volumes/BACKUP_2TB/Maestria/Datasets/Crowd_PETS09/S2/L1/Time_12-34/View_001'
+        help='Path from where to read images', default=""
     )
 
     FLAGS = parser.parse_args()
