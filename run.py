@@ -23,21 +23,22 @@ max_cosine_distance = 0.3
 nn_budget = None
 nms_max_overlap = 1.0
 
-def detect_img(yolo, image_path):
-    try:
-        image = Image.open(image_path)
-    except:
-        print('Open Error! Try again!')
-    else:
-        r_image, boxes = yolo.detect_image(image)
-        # opencvImage = cv2.cvtColor(np.array(r_image), cv2.COLOR_RGB2BGR)
-        # cv2.namedWindow('result', cv2.WINDOW_NORMAL)
-        # cv2.imshow('result', opencvImage)
 
-        # cv2.imwrite(os.path.splitext(image_path)[0] + '_output.jpg', opencvImage)
-        return r_image, boxes
+def yolo_setup(FLAGS):
+    yolo = YOLO(**vars(FLAGS))
+    return yolo
 
-def deep_sort(image, detection_boxes, tracker, encoder, fps=None):
+def deep_sort_setup():
+    encoder = generate_detections.create_box_encoder(deep_sort_model_filename, batch_size=1)
+    metric = nn_matching.NearestNeighborDistanceMetric('cosine', max_cosine_distance, nn_budget)
+    tracker = Tracker(metric)
+    return encoder, tracker
+
+def run_yolo(yolo, image):
+    image, boxes = yolo.detect_image(image)
+    return image, boxes
+
+def run_deep_sort(image, detection_boxes, tracker, encoder, fps=None):
     img_width, img_height = image.size
     frame = np.asarray(image)
 
@@ -82,19 +83,19 @@ def deep_sort(image, detection_boxes, tracker, encoder, fps=None):
     resized_image = cv2.resize(frame, (window_width, window_height))
     cv2.imshow('result', resized_image)
 
+def run_pipeline(image, yolo, tracker, encoder, fps=None):
+    new_image, boxes = run_yolo(yolo, image)
+    run_deep_sort(image, boxes, tracker, encoder, fps)
 
 def main(FLAGS):
-    yolo = YOLO(**vars(FLAGS))
     output_path = FLAGS.video_output
-
-    encoder = generate_detections.create_box_encoder(deep_sort_model_filename, batch_size=1)
-    metric = nn_matching.NearestNeighborDistanceMetric('cosine', max_cosine_distance, nn_budget)
-    tracker = Tracker(metric)
+    # initial setup
+    yolo = yolo_setup(FLAGS)
+    encoder, tracker = deep_sort_setup()
 
     if FLAGS.images_path:
         for image_path in glob.glob(FLAGS.images_path + '/*.jpg'):
-            image, boxes = detect_img(yolo, image_path)
-            deep_sort(image, boxes, tracker, encoder)
+            run_pipeline(image, yolo, tracker, encoder)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -117,7 +118,7 @@ def main(FLAGS):
         while True:
             return_value, frame = vid.read()
             image = Image.fromarray(frame)
-            image, boxes = yolo.detect_image(image)
+            run_pipeline(image, yolo, tracker, encoder, fps)
 
             curr_time = timer()
             exec_time = curr_time - prev_time
@@ -129,7 +130,6 @@ def main(FLAGS):
                 fps = "FPS: " + str(curr_fps)
                 curr_fps = 0
 
-            deep_sort(image, boxes, tracker, encoder, fps)
             if isOutput:
                 out.write(result)
             if cv2.waitKey(1) & 0xFF == ord('q'):
