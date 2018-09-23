@@ -44,7 +44,8 @@ def run_yolo(frame, yolo):
     return yolo_image, boxes, scores
 
 def run_deep_sort(frame, detection_boxes, detection_scores, tracker, encoder):
-    # I'm not sure this is neccessary since they seem to use plain open cv for handling images (BGR order)
+    # deep_sort uses a BGR image as input
+    # check generate_detections function description
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     features = encoder(frame, detection_boxes)
@@ -158,7 +159,7 @@ def main(FLAGS):
             accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
             display_results(result_image, fps, tracker, detections)
 
-            # one frame at a time
+            # show one frame at a time
             cv2.waitKey(0)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
