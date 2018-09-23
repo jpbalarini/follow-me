@@ -34,13 +34,14 @@ def deep_sort_setup():
     tracker = Tracker(metric)
     return encoder, tracker
 
-def run_yolo(yolo, image):
-    image, boxes = yolo.detect_image(image)
-    return image, boxes
+def run_yolo(frame, yolo):
+    pil_image = Image.fromarray(frame)
+    yolo_image, boxes = yolo.detect_image(pil_image)
+    return yolo_image, boxes
 
-def run_deep_sort(image, detection_boxes, tracker, encoder, fps=None):
-    img_width, img_height = image.size
-    frame = np.asarray(image)
+def run_deep_sort(frame, detection_boxes, tracker, encoder):
+    # I'm not sure this is neccessary since they seem to use plain open cv for handling images (BGR order)
+    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     features = encoder(frame, detection_boxes)
     detections = [Detection(bbox, 1.0, feature) for bbox, feature in zip(detection_boxes, features)]
@@ -54,6 +55,17 @@ def run_deep_sort(image, detection_boxes, tracker, encoder, fps=None):
     # Update tracker.
     tracker.predict()
     tracker.update(detections)
+
+    return tracker, detections
+
+def run_pipeline(frame, yolo, tracker, encoder):
+    yolo_image, boxes = run_yolo(frame, yolo)
+    tracker, detections = run_deep_sort(frame, boxes, tracker, encoder)
+
+    return frame, tracker, detections
+
+def display_results(frame, fps, tracker, detections):
+    img_height, img_width = frame.shape[:2]
 
     for track in tracker.tracks:
         if track.is_confirmed() and track.time_since_update > 1:
@@ -73,19 +85,25 @@ def run_deep_sort(image, detection_boxes, tracker, encoder, fps=None):
     window_width = int(img_width * scale)
     window_height = int(img_height * scale)
 
-    if fps:
-        cv2.putText(frame, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=2.0, color=(255, 0, 0), thickness=2)
-    else:
-        # image doesnt have right color order
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    cv2.putText(frame, text=fps, org=(5, 30), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=1.0, color=(0, 0, 255), thickness=3)
     cv2.namedWindow('result', cv2.WINDOW_NORMAL)
     resized_image = cv2.resize(frame, (window_width, window_height))
+
+    resized_image = cv2.cvtColor(resized_image, cv2.COLOR_RGB2BGR)
     cv2.imshow('result', resized_image)
 
-def run_pipeline(image, yolo, tracker, encoder, fps=None):
-    new_image, boxes = run_yolo(yolo, image)
-    run_deep_sort(image, boxes, tracker, encoder, fps)
+def compute_fps(accum_time, curr_fps, prev_time):
+    curr_time = timer()
+    exec_time = curr_time - prev_time
+    new_prev_time = curr_time
+    new_accum_time = accum_time + exec_time
+    new_curr_fps = curr_fps + 1
+    if new_accum_time > 1:
+        new_accum_time = new_accum_time - 1
+        new_fps = "FPS: " + str(new_curr_fps)
+        new_curr_fps = 0
+    return new_accum_time, new_curr_fps, new_fps, new_prev_time
 
 def main(FLAGS):
     output_path = FLAGS.video_output
@@ -93,16 +111,26 @@ def main(FLAGS):
     yolo = yolo_setup(FLAGS)
     encoder, tracker = deep_sort_setup()
 
+    accum_time = 0
+    curr_fps = 0
+    prev_time = timer()
+
     if FLAGS.images_path:
         for image_path in glob.glob(FLAGS.images_path + '/*.jpg'):
-            run_pipeline(image, yolo, tracker, encoder)
+            image = cv2.imread(image_path)
+            # fix image color order BGR (opencv default) -> RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+            result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder)
+            accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
+            display_results(result_image, fps, tracker, detections)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     elif FLAGS.video_input:
         vid = cv2.VideoCapture(FLAGS.video_input)
         if not vid.isOpened():
-            raise IOError("Couldn't open webcam or video")
+            raise IOError("Can't open webcam or video")
         video_FourCC = int(vid.get(cv2.CAP_PROP_FOURCC))
         video_fps = vid.get(cv2.CAP_PROP_FPS)
         video_size = (int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
@@ -111,24 +139,14 @@ def main(FLAGS):
         if isOutput:
             print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
             out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
-        accum_time = 0
-        curr_fps = 0
-        fps = "FPS: ??"
-        prev_time = timer()
-        while True:
-            return_value, frame = vid.read()
-            image = Image.fromarray(frame)
-            run_pipeline(image, yolo, tracker, encoder, fps)
 
-            curr_time = timer()
-            exec_time = curr_time - prev_time
-            prev_time = curr_time
-            accum_time = accum_time + exec_time
-            curr_fps = curr_fps + 1
-            if accum_time > 1:
-                accum_time = accum_time - 1
-                fps = "FPS: " + str(curr_fps)
-                curr_fps = 0
+        while True:
+            return_value, image = vid.read()
+            # fix image color order BGR (opencv default) -> RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder)
+            accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
+            display_results(result_image, fps, tracker, detections)
 
             if isOutput:
                 out.write(result)
