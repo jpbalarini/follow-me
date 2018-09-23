@@ -1,5 +1,7 @@
 # follow-me
 
+You can run this from a folder with images (which correspond to video frames), or from a video. Also, you can skip detection phase by providing a detection file (MOT format).
+
 ## Run from images
 python3 run.py --images_path=/Volumes/BACKUP_2TB/Maestria/Datasets/MOT16/test/MOT16-06/img1
 
