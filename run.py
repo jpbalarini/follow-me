@@ -36,15 +36,17 @@ def deep_sort_setup():
 
 def run_yolo(frame, yolo):
     pil_image = Image.fromarray(frame)
-    yolo_image, boxes = yolo.detect_image(pil_image)
-    return yolo_image, boxes
+    yolo_image, boxes, scores = yolo.detect_image(pil_image)
+    return yolo_image, boxes, scores
 
-def run_deep_sort(frame, detection_boxes, tracker, encoder):
+def run_deep_sort(frame, detection_boxes, detection_scores, tracker, encoder):
     # I'm not sure this is neccessary since they seem to use plain open cv for handling images (BGR order)
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     features = encoder(frame, detection_boxes)
-    detections = [Detection(bbox, 1.0, feature) for bbox, feature in zip(detection_boxes, features)]
+    detections = [
+        Detection(bbox, score, feature) for bbox, score, feature in zip(detection_boxes, detection_scores, features)
+    ]
 
     # Run non-maxima suppression.
     boxes = np.array([d.tlwh for d in detections])
@@ -59,8 +61,8 @@ def run_deep_sort(frame, detection_boxes, tracker, encoder):
     return tracker, detections
 
 def run_pipeline(frame, yolo, tracker, encoder):
-    yolo_image, boxes = run_yolo(frame, yolo)
-    tracker, detections = run_deep_sort(frame, boxes, tracker, encoder)
+    yolo_image, boxes, scores = run_yolo(frame, yolo)
+    tracker, detections = run_deep_sort(frame, boxes, scores, tracker, encoder)
 
     return frame, tracker, detections
 
@@ -71,12 +73,18 @@ def display_results(frame, fps, tracker, detections):
         if track.is_confirmed() and track.time_since_update > 1:
             continue
         bbox = track.to_tlbr()
-        cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])),(255,255,255), 2)
-        cv2.putText(frame, str(track.track_id),(int(bbox[0]), int(bbox[1])),0, 5e-3 * 200, (0,255,0),2)
+        cv2.rectangle(frame, pt1=(int(bbox[0]), int(bbox[1])), pt2=(int(bbox[2]), int(bbox[3])),
+            color=(255, 255, 255), thickness=2)
+        cv2.putText(frame, text=str(track.track_id), org=(int(bbox[0]), int(bbox[1])),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.8, color=(0, 255, 0), thickness=2)
 
     for det in detections:
         bbox = det.to_tlbr()
-        cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])),(255,0,0), 2)
+        cv2.rectangle(frame, pt1=(int(bbox[0]), int(bbox[1])), pt2=(int(bbox[2]), int(bbox[3])),
+            color=(255, 0, 0), thickness=2)
+        label = "{0:.1f}".format(det.confidence)
+        cv2.putText(frame, text=label, org=(int(bbox[2]), int(bbox[1])),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 255), thickness=1)
 
     max_window_size = 800, 600
     scale_width = max_window_size[0] / img_width
@@ -116,14 +124,20 @@ def main(FLAGS):
     prev_time = timer()
 
     if FLAGS.images_path:
-        for image_path in glob.glob(FLAGS.images_path + '/*.jpg'):
-            image = cv2.imread(image_path)
+        filenames = glob.glob(FLAGS.images_path + '/*.jpg')
+        filenames.sort()
+        images = [cv2.imread(image_path) for image_path in filenames]
+
+        for image in images:
             # fix image color order BGR (opencv default) -> RGB
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder)
             accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
             display_results(result_image, fps, tracker, detections)
+
+            # one frame at a time
+            cv2.waitKey(0)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
