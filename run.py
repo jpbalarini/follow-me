@@ -23,6 +23,10 @@ max_cosine_distance = 0.3
 nn_budget = None
 nms_max_overlap = 1.0
 
+# global variables if I want to read detections from file (MOT format)
+detections_in = None
+frame_indices = None
+
 
 def yolo_setup(FLAGS):
     yolo = YOLO(**vars(FLAGS))
@@ -60,8 +64,15 @@ def run_deep_sort(frame, detection_boxes, detection_scores, tracker, encoder):
 
     return tracker, detections
 
-def run_pipeline(frame, yolo, tracker, encoder):
-    yolo_image, boxes, scores = run_yolo(frame, yolo)
+def run_pipeline(frame, yolo, tracker, encoder, frame_idx=None, run_detection=True):
+    if run_detection:
+        yolo_image, boxes, scores = run_yolo(frame, yolo)
+    else:
+        mask = frame_indices == frame_idx
+        rows = detections_in[mask]
+        boxes = rows[:, 2:6].copy()
+        scores = rows[:, 6:7].copy()
+
     tracker, detections = run_deep_sort(frame, boxes, scores, tracker, encoder)
 
     return frame, tracker, detections
@@ -122,17 +133,28 @@ def main(FLAGS):
     accum_time = 0
     curr_fps = 0
     prev_time = timer()
+    run_detection = True
+
+    if FLAGS.load_detection_file:
+        run_detection = False
+        global detections_in
+        detections_in = np.loadtxt(FLAGS.load_detection_file, delimiter=',')
+        # Filter those which are below confidence
+        detections_in = detections_in[detections_in[:, 6] > FLAGS.score]
+        global frame_indices
+        frame_indices = detections_in[:, 0].astype(np.int)
 
     if FLAGS.images_path:
         filenames = glob.glob(FLAGS.images_path + '/*.jpg')
         filenames.sort()
         images = [cv2.imread(image_path) for image_path in filenames]
 
-        for image in images:
+        for frame_idx, image in enumerate(images, start=1):
+            print('Frame index: ' + str(frame_idx))
             # fix image color order BGR (opencv default) -> RGB
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-            result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder)
+            result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder, frame_idx, run_detection)
             accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
             display_results(result_image, fps, tracker, detections)
 
@@ -211,6 +233,16 @@ if __name__ == '__main__':
     parser.add_argument(
         '--images_path', type=str,
         help='Path from where to read images', default=""
+    )
+
+    parser.add_argument(
+        '--load_detection_file', type=str,
+        help='Does not perform classification and loads detections from file (MOT format)', default=""
+    )
+
+    parser.add_argument(
+        '--score', type=float,
+        help='Detections with lower scores than this will be filtered', default=0.3
     )
 
     FLAGS = parser.parse_args()
