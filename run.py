@@ -119,9 +119,10 @@ def compute_fps(accum_time, curr_fps, prev_time):
     new_prev_time = curr_time
     new_accum_time = accum_time + exec_time
     new_curr_fps = curr_fps + 1
+    new_fps = "FPS: "
     if new_accum_time > 1:
         new_accum_time = new_accum_time - 1
-        new_fps = "FPS: " + str(new_curr_fps)
+        new_fps += str(new_curr_fps)
         new_curr_fps = 0
     return new_accum_time, new_curr_fps, new_fps, new_prev_time
 
