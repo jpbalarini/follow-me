@@ -4,7 +4,7 @@ You can run this from a folder with images (which correspond to video frames), o
 
 ## Create an ENV variable with the code path
 ```
-export CODE_PATH=/Volumes/BACKUP_2TB/Maestria
+export CODE_PATH=/Volumes/128GB/Maestria
 ```
 
 ## Run from images
@@ -24,7 +24,7 @@ python3 run.py --images_path=$CODE_PATH/Datasets/MOT16/test/MOT16-06/img1 --load
 
 ## Run deep sort
 ```
-python deep_sort_app.py --sequence_dir=../../../Datasets/MOT16/test/MOT16-06 --detection_file=$CODE_PATH/Datasets/MOT16/resources/detections/MOT16_POI_test/MOT16-06.npy --min_confidence=0.3 --nn_budget=100 --display=True
+python deep_sort_app.py --sequence_dir=../../../Datasets/MOT16/test/MOT16-06 --detection_file=$CODE_PATH/Datasets/MOT16/resources_deep_sort/detections/MOT16_POI_test/MOT16-06.npy --min_confidence=0.3 --nn_budget=100 --display=True
 ```
 
 ## Remove useless files (causes conflics when reading images from folder)
@@ -34,10 +34,12 @@ find . -type f -name '._*' -delete
 ```
 
 ## Run metrics (performance, accuracy) - Works with deep sort for now
+
+### Deep sort
 Create tracking files
 ```
 cd $CODE_PATH/Code/lib/deep_sort
-python evaluate_motchallenge.py --mot_dir=$CODE_PATH/Datasets/MOT16/train --detection_dir=$CODE_PATH/Datasets/MOT16/resources/detections/MOT16_POI_train
+python evaluate_motchallenge.py --mot_dir=$CODE_PATH/Datasets/MOT16/train --detection_dir=$CODE_PATH/Datasets/MOT16/resources_deep_sort/detections/MOT16_POI_train
 ```
 
 Evaluate performance
@@ -46,8 +48,7 @@ Uses: `https://github.com/cheind/py-motmetrics`
 python -m motmetrics.apps.eval_motchallenge $CODE_PATH/Datasets/MOT16/train $CODE_PATH/Code/lib/deep_sort/results --fmt mot16
 ```
 
-
-Current metrics:
+Metrics using deep_sort MOT detections:
 11:09:21 INFO - Found 7 groundtruths and 7 test files.
 11:09:21 INFO - Available LAP solvers ['lap', 'scipy']
 11:09:21 INFO - Default LAP solver 'lap'
@@ -70,3 +71,22 @@ MOT16-02 40.7% 46.4% 36.2% 53.9% 69.1%  54  12  31 11  4302  8215 138   252 29.0
 MOT16-04 70.0% 76.0% 64.8% 71.9% 84.3%  83  42  26 15  6358 13358  71   255 58.4% 0.167
 OVERALL  60.2% 64.4% 56.6% 70.1% 79.9% 517 214 235 68 19490 32985 935  1439 51.6% 0.189
 11:23:50 INFO - Completed
+
+### Follow me
+```
+python3 run.py --images_path=/Volumes/128GB/Maestria/Datasets/MOT16/train/MOT16-02/img1 --store_detections=results/MOT16-02.txt --no-display
+```
+
+
+python -m motmetrics.apps.eval_motchallenge $CODE_PATH/Datasets/MOT16/train2 /Volumes/128GB/Maestria/Code/results --fmt mot16
+02:26:17 INFO - Found 1 groundtruths and 1 test files.
+02:26:17 INFO - Available LAP solvers ['lap', 'scipy']
+02:26:17 INFO - Default LAP solver 'lap'
+02:26:17 INFO - Loading files.
+02:26:17 INFO - Comparing MOT16-02...
+02:26:24 INFO - Running metrics
+          IDF1   IDP   IDR  Rcll  Prcn GT MT PT ML   FP    FN IDs   FM MOTA  MOTP
+MOT16-02 27.1% 42.0% 20.0% 28.9% 60.6% 54  7 19 28 3343 12683  88  170 9.6% 0.269
+OVERALL  27.1% 42.0% 20.0% 28.9% 60.6% 54  7 19 28 3343 12683  88  170 9.6% 0.269
+02:26:40 INFO - Completed
+

@@ -113,6 +113,18 @@ def display_results(frame, fps, tracker, detections):
     resized_image = cv2.cvtColor(resized_image, cv2.COLOR_RGB2BGR)
     cv2.imshow('result', resized_image)
 
+def generate_mot_detections(frame_idx, detections, tracker):
+    # Filter tracks first
+    result = []
+    for track in tracker.tracks:
+        if not track.is_confirmed() or track.time_since_update > 1:
+            continue
+        bbox = track.to_tlwh()
+        # put detection score to 1 for now
+        result.append([frame_idx, track.track_id, bbox[0], bbox[1], bbox[2], bbox[3], 1.0])
+
+    return np.array(result)
+
 def compute_fps(accum_time, curr_fps, prev_time):
     curr_time = timer()
     exec_time = curr_time - prev_time
@@ -136,6 +148,8 @@ def main(FLAGS):
     curr_fps = 0
     prev_time = timer()
     run_detection = True
+    # Array for storing al the results (if I want to save them later)
+    accum_results = np.array([]).reshape(0, 7)
 
     if FLAGS.load_detection_file:
         run_detection = False
@@ -158,14 +172,20 @@ def main(FLAGS):
 
             result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder, frame_idx, run_detection)
             accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
-            display_results(result_image, fps, tracker, detections)
 
-            # show one frame at a time
-            cv2.waitKey(0)
+            if FLAGS.store_detections:
+                result = generate_mot_detections(frame_idx, detections, tracker)
+                if len(result) > 0:
+                    accum_results = np.concatenate((accum_results, result), axis=0)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            if FLAGS.display:
+                display_results(result_image, fps, tracker, detections)
+                # show one frame at a time
+                cv2.waitKey(0)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
     elif FLAGS.video_input:
+        frame_idx = 1
         vid = cv2.VideoCapture(FLAGS.video_input)
         if not vid.isOpened():
             raise IOError("Can't open webcam or video")
@@ -184,14 +204,29 @@ def main(FLAGS):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             result_image, tracker, detections = run_pipeline(image, yolo, tracker, encoder)
             accum_time, curr_fps, fps, prev_time = compute_fps(accum_time, curr_fps, prev_time)
-            display_results(result_image, fps, tracker, detections)
+            if FLAGS.store_detections:
+                result = generate_mot_detections(frame_idx, detections, tracker)
+                if len(result) > 0:
+                    accum_results = np.concatenate((accum_results, result), axis=0)
 
-            if isOutput:
-                out.write(result)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            if FLAGS.display:
+                display_results(result_image, fps, tracker, detections)
+
+                if isOutput:
+                    out.write(result)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+            frame_idx += 1
+
     yolo.close_session()
     cv2.destroyAllWindows()
+
+    # Save results to file
+    if FLAGS.store_detections:
+        f = open(FLAGS.store_detections, 'w')
+        for row in accum_results:
+            print('%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,-1,-1,-1' % (
+                row[0], row[1], row[2], row[3], row[4], row[5], row[6]), file=f)
 
 
 if __name__ == '__main__':
@@ -220,7 +255,6 @@ if __name__ == '__main__':
     '''
     Command line positional arguments -- for video detection mode
     '''
-    # /Volumes/BACKUP_2TB/Maestria/Datasets/test.mp4
     parser.add_argument(
         "--video_input", nargs='?', type=str, required=False,
         default='/Volumes/BACKUP_2TB/Maestria/Datasets/test.mp4',
@@ -230,22 +264,25 @@ if __name__ == '__main__':
         "--video_output", nargs='?', type=str, default="",
         help = "[Optional] Video output path"
     )
-
-    # /Volumes/BACKUP_2TB/Maestria/Datasets/Crowd_PETS09/S2/L1/Time_12-34/View_001
     parser.add_argument(
         '--images_path', type=str,
         help='Path from where to read images', default=""
     )
-
     parser.add_argument(
         '--load_detection_file', type=str,
         help='Does not perform classification and loads detections from file (MOT format)', default=""
     )
-
     parser.add_argument(
         '--score', type=float,
         help='Detections with lower scores than this will be filtered', default=0.3
     )
+    parser.add_argument(
+        '--store_detections', nargs='?', type=str, required=False,
+        help='Store detections folder'
+    )
+    parser.add_argument('--display', dest='display', action='store_true')
+    parser.add_argument('--no-display', dest='display', action='store_false')
+    parser.set_defaults(display=True)
 
     FLAGS = parser.parse_args()
 
